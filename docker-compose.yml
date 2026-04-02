@@ -1,10 +1,14 @@
 version: '3.8'
 
+networks:
+  coolify:
+    external: true
+
 services:
   app:
     build: .
-    ports:
-      - '3000:3000'
+    expose:
+      - '3000'
     environment:
       - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/multitenant
       - ROOT_DOMAIN=${ROOT_DOMAIN}
@@ -13,6 +17,32 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - coolify
+      - default
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+
+      # Service — port the app listens on
+      - traefik.http.services.multitenant-app.loadbalancer.server.port=3000
+
+      # HTTPS router — catches root domain + all subdomains
+      - "traefik.http.routers.multitenant-https.rule=Host(`enabtech.com`) || HostRegexp(`^.+\\.enabtech\\.com$`)"
+      - traefik.http.routers.multitenant-https.entrypoints=https
+      - traefik.http.routers.multitenant-https.tls=true
+      - traefik.http.routers.multitenant-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.multitenant-https.tls.domains[0].main=enabtech.com
+      - traefik.http.routers.multitenant-https.tls.domains[0].sans=*.enabtech.com
+      - traefik.http.routers.multitenant-https.service=multitenant-app
+      - traefik.http.routers.multitenant-https.middlewares=gzip
+      - traefik.http.routers.multitenant-https.priority=10
+
+      # HTTP router — redirect to HTTPS
+      - "traefik.http.routers.multitenant-http.rule=Host(`enabtech.com`) || HostRegexp(`^.+\\.enabtech\\.com$`)"
+      - traefik.http.routers.multitenant-http.entrypoints=http
+      - traefik.http.routers.multitenant-http.middlewares=redirect-to-https
+      - traefik.http.routers.multitenant-http.priority=10
 
   db:
     image: postgres:16-alpine
@@ -28,6 +58,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - default
 
 volumes:
   postgres_data:
